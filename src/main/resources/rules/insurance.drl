@@ -1,0 +1,25 @@
+package rules;
+
+import com.alesaudate.samples.camel.drools.model.InsuranceRequest;
+import com.alesaudate.samples.camel.drools.model.InsuranceStatus;
+import com.alesaudate.samples.camel.drools.model.Person;
+import com.alesaudate.samples.camel.drools.model.Status;
+
+rule "Check applicant older than 18"
+when request: InsuranceRequest(applicant.age >= 18)
+then
+	InsuranceStatus insuranceStatus = new InsuranceStatus();
+	insuranceStatus.setStatus(Status.ACCEPTED);
+	request.setStatus(insuranceStatus);
+end
+
+
+rule "Applicant younger than 18"
+when request: InsuranceRequest(applicant.age < 18)
+then
+	InsuranceStatus insuranceStatus = new InsuranceStatus();
+	insuranceStatus.setStatus(Status.DENIED);
+	request.setStatus(insuranceStatus);
+end
+
+

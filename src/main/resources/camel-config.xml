@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+	xmlns:camel="http://camel.apache.org/schema/spring"
+	xmlns:drools="http://drools.org/schema/drools-spring" 
+	xmlns:cxf="http://camel.apache.org/schema/cxf"
+	xmlns:jaxrs="http://cxf.apache.org/jaxrs"
+	xmlns:broker="http://activemq.apache.org/schema/core"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+       http://camel.apache.org/schema/spring http://camel.apache.org/schema/spring/camel-spring.xsd
+       http://camel.apache.org/schema/cxf http://camel.apache.org/schema/cxf/camel-cxf.xsd
+       http://cxf.apache.org/jaxrs http://cxf.apache.org/schemas/jaxrs.xsd
+       http://drools.org/schema/drools-spring http://drools.org/schema/drools-spring.xsd
+       http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core-5.5.0.xsd
+       http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd">
+
+	<import resource="classpath:META-INF/cxf/cxf.xml" />	
+	<import resource="classpath:META-INF/cxf/cxf-servlet.xml" />
+	
+	<bean id="droolsProcessor" class="com.alesaudate.samples.camel.DroolsProcessor">
+		<property name="session" ref="ksession1" />
+	</bean>
+
+
+	<drools:kbase id="kbase1">
+		<drools:resources>
+			<drools:resource type="DRL" source="classpath:rules/insurance.drl" />
+		</drools:resources>
+	</drools:kbase>
+
+	<drools:ksession id="ksession1" type="stateless" kbase="kbase1" />
+
+	<broker:broker id="broker" useJmx="true" persistent="false"
+		brokerName="localhost">
+		<broker:transportConnectors>
+			<broker:transportConnector name="vm"
+				uri="vm://localhost" />
+		</broker:transportConnectors>
+	</broker:broker>
+
+	<!-- lets configure the Camel ActiveMQ to use the ActiveMQ broker declared 
+		above -->
+	<bean id="activemq" class="org.apache.activemq.camel.component.ActiveMQComponent">
+		<property name="brokerURL" value="vm://localhost" />
+	</bean>
+
+	<bean id="transactionManager" class="org.springframework.orm.jpa.JpaTransactionManager">
+		<property name="entityManagerFactory" ref="entityManagerFactory" />
+	</bean>
+	
+
+	
+	<bean id="entityManagerFactory" class="org.springframework.orm.jpa.LocalEntityManagerFactoryBean">
+		<property name="persistenceUnitName" value="camel" />
+	</bean>
+	
+	<bean id="jpaTemplate" class="org.springframework.orm.jpa.JpaTemplate">
+		<property name="entityManagerFactory" ref="entityManagerFactory" />
+	</bean>
+	
+	<bean id="auditRESTService" class="com.alesaudate.samples.camel.cxf.services.AuditInsuranceService">
+		<property name="jpaTemplate" ref="jpaTemplate" />
+	</bean>
+
+	<jaxrs:server id="server" address="/rest/">
+		<jaxrs:serviceBeans>
+			<ref bean="auditRESTService"/>
+		</jaxrs:serviceBeans>
+	</jaxrs:server>
+	
+	<camel:camelContext>
+	
+		<camel:route>
+			<camel:from
+				uri="cxf:/insurance?serviceClass=com.alesaudate.samples.camel.cxf.services.InsuranceService" />
+				
+				<camel:transform>
+					<camel:groovy>
+						req = new com.alesaudate.samples.camel.drools.model.InsuranceRequest();
+						req.setApplicant(request.body);
+						request.body = req;
+					</camel:groovy>
+				</camel:transform>
+			<camel:process ref="droolsProcessor" />
+
+			<camel:choice>
+				<camel:when>
+					<camel:simple>${body.status.status.name} == 'ACCEPTED'</camel:simple>
+					<camel:to uri="log:auditing" />
+					<camel:to uri="activemq:queue:audit.queue" pattern="InOnly" />
+				</camel:when>
+				<camel:otherwise>
+					<camel:to uri="log:dead" />
+				</camel:otherwise>
+			</camel:choice>
+			
+			<camel:setBody>
+				<camel:simple>${body.status}</camel:simple>
+			</camel:setBody>
+		</camel:route>
+
+
+		<camel:route>
+			<camel:from uri="activemq:queue:audit.queue" />
+			<camel:to uri="jpa://java.lang.Object" />
+		</camel:route>
+		
+		
+		
+	</camel:camelContext>
+
+	
+
+</beans>
